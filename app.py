@@ -83,7 +83,7 @@ def encode_image_to_base64(uploaded_file):
     bytes_data = uploaded_file.getvalue()
     return base64.b64encode(bytes_data).decode('utf-8')
 
-def generate_review(api_key, model_name, image_base64, mime_type, style, topics):
+def generate_review(api_key, model_name, image_base64, mime_type, style, topics, rating):
     """OpenAI API를 사용하여 이미지 기반 리뷰 초안을 생성합니다."""
     client = OpenAI(api_key=api_key)
     
@@ -95,7 +95,35 @@ def generate_review(api_key, model_name, image_base64, mime_type, style, topics)
         "블로그 체험단 스타일": "이모티콘을 적절히 섞어 활기차고 풍부한 묘사로 상품의 장점을 돋보이게 작성하십시오."
     }
     
-    topic_str = ", ".join(topics) if topics else "상품의 전반적인 특징"
+    # 별점에 따른 긍정/부정/보통 감정 가이드라인 설정
+    if rating == 5:
+        sentiment_guide = (
+            "이 리뷰는 매우 긍정적이고 대만족(별점 5/5점)한 상품평입니다. "
+            "상품의 장점, 훌륭한 부분, 강력 추천하는 이유만을 가득 담아 극찬하는 톤으로 작성하십시오. "
+            "절대로 부정적인 코멘트, 아쉬운 점, 단점, 배송 불만 등을 조금이라도 포함하지 마십시오."
+        )
+    elif rating == 4:
+        sentiment_guide = (
+            "이 리뷰는 긍정적이고 만족(별점 4/5점)한 상품평입니다. "
+            "대체로 상품의 장점과 유용한 점들을 부각하여 만족스러운 톤으로 작성하되, "
+            "신뢰도를 높이기 위해 일상적이고 사소한 아쉬운 점(예: 배송 상자가 조금 찌그러짐, 색상이 모니터 화면보다 아주 살짝 어두움 등)을 단 한 줄만 가볍게 덧붙이십시오."
+        )
+    elif rating == 3:
+        sentiment_guide = (
+            "이 리뷰는 보통/중립적(별점 3/5점)인 평범한 상품평입니다. "
+            "상품에 대한 과장된 칭찬이나 일방적인 비난 없이, 마음에 들었던 점(장점)과 아쉬웠던 점(단점/개선사항)을 솔직하고 객관적으로 균형 있게 각각 절반씩 구성하여 작성하십시오."
+        )
+    else:  # 1 or 2 stars
+        sentiment_guide = (
+            f"이 리뷰는 매우 실망스럽고 부정적(별점 {rating}/5점)인 상품평입니다. "
+            "상품의 결정적인 단점, 불만 사항, 품질 문제, 기대에 미치지 못한 원인 등을 중점적으로 묘사하여 비판적인 톤으로 작성하십시오. "
+            "재구매 의사가 없거나 비추천하는 내용을 담되, 지나치게 감정적이거나 비하하는 욕설 대신 객관적인 팩트(예: 마감이 조잡함, 사진과 실물이 너무 다름, 기능 고장 등)에 근거하여 아쉬운 점을 상세히 고발하는 느낌으로 서술하십시오."
+        )
+
+    if topics:
+        topic_instruction = f"오직 사용자가 선택한 강조 항목인 '{', '.join(topics)}'에 대한 내용만을 주제로 다루어 작성하십시오. 선택되지 않은 다른 요소나 측면(예: 선택되지 않은 가성비, 배송 상태, 조립 편의성, 사이즈 등)은 철저히 배제하고 리뷰 본문에 일절 언급하지 마십시오."
+    else:
+        topic_instruction = "상품의 전반적인 특징에 대해 언급하여 작성하십시오."
     
     prompt = f"""
 당신은 대한민국 대표 쇼핑몰의 전문 상품평 리뷰 작성 도우미입니다.
@@ -103,9 +131,8 @@ def generate_review(api_key, model_name, image_base64, mime_type, style, topics)
 
 [작성 지침]
 1. **리뷰 스타일**: {style_guide.get(style, style)}
-2. **집중 분석 및 강조 항목**: {topic_str}
-3. **분석 상세**: 사진에서 파악할 수 있는 실제 특징(예: 색감, 재질, 형태, 포장 상태, 실용성 등)을 상세히 언급하십시오.
-4. **신뢰도 제고**: 칭찬 일색보다는 약간의 아쉬운 점(예: 배송 시간, 개봉 시 냄새, 생각보다 작은 크기 등 사진 혹은 일반적인 수준의 단점)을 자연스럽게 1가지 추가하여 신뢰도를 높이십시오.
+2. **분석 및 강조 항목 제한**: {topic_instruction}
+3. **별점 및 감정 지침**: {sentiment_guide}
 
 [출력 포맷]
 반드시 다음 JSON 스키마를 완벽히 준수하는 JSON 객체로만 응답하십시오:
@@ -197,6 +224,14 @@ review_topics = st.sidebar.multiselect(
     default=["디자인 및 색상", "재질 및 촉감"]
 )
 
+review_rating = st.sidebar.selectbox(
+    "⭐ 상품 별점 (최대 5개)",
+    options=[5, 4, 3, 2, 1],
+    index=0,
+    format_func=lambda x: "⭐" * x + f" ({x}점)",
+    help="선택한 별점에 맞춰 긍정/중립/부정 리뷰 초안이 작성됩니다."
+)
+
 # ----------------- Main Layout -----------------
 
 st.markdown('<div class="gradient-title">Review AI</div>', unsafe_allow_html=True)
@@ -272,7 +307,8 @@ with col2:
                         image_base64=base64_image,
                         mime_type=mime_type,
                         style=review_style,
-                        topics=review_topics
+                        topics=review_topics,
+                        rating=review_rating
                     )
                     
                     # 세션 상태 저장
@@ -305,21 +341,21 @@ with col2:
         # 텍스트 영역 실시간 변경사항 저장
         st.session_state.edited_review = edited_text
         
-        # 3. 최종 등록 시뮬레이션
-        st.markdown("---")
-        submit_btn = st.button("🚀 최종 리뷰 등록하기", width='stretch')
-        
-        if submit_btn:
-            st.success("🎉 리뷰가 성공적으로 등록되었습니다! 소중한 평가 감사드립니다.")
-            st.balloons()
-            
-            # 초기화 버튼
-            if st.button("새 리뷰 작성하기"):
-                st.session_state.analysis_result = None
-                st.session_state.edited_review = ""
-                if "review_area" in st.session_state:
-                    st.session_state.review_area = ""
-                st.rerun()
+        # 3. 최종 등록 시뮬레이션 (히든 처리)
+        # st.markdown("---")
+        # submit_btn = st.button("🚀 최종 리뷰 등록하기", width='stretch')
+        # 
+        # if submit_btn:
+        #     st.success("🎉 리뷰가 성공적으로 등록되었습니다! 소중한 평가 감사드립니다.")
+        #     st.balloons()
+        #     
+        #     # 초기화 버튼
+        #     if st.button("새 리뷰 작성하기"):
+        #         st.session_state.analysis_result = None
+        #         st.session_state.edited_review = ""
+        #         if "review_area" in st.session_state:
+        #             st.session_state.review_area = ""
+        #         st.rerun()
     else:
         st.info("💡 사진을 업로드하고 'AI 리뷰 초안 만들기' 버튼을 누르면 이 영역에 분석 결과가 표시됩니다.")
         
